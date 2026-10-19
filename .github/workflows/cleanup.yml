@@ -797,6 +797,17 @@ jobs:
           if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             echo "正在打susfs补丁"
             patch -p1 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
+
+            # ==== 修复 SUSFS hunk #1 在 OPLUS 树上失败（缺 susfs_def.h 与 SUS_MOUNT 声明）====
+            if [ -f fs/namespace.c.rej ]; then
+              echo "检测到 fs/namespace.c.rej，手动补齐 susfs_def.h / SUS_MOUNT 声明..."
+              grep -q 'linux/susfs_def.h' fs/namespace.c || \
+                sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif' fs/namespace.c
+              grep -q 'susfs_is_current_ksu_domain' fs/namespace.c || \
+                sed -i '/Maximum number of mounts in a mount namespace/i #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n\n#define CL_COPY_MNT_NS BIT(25)\n#endif' fs/namespace.c
+              rm -f fs/namespace.c.rej
+              echo "namespace.c 修复完成"
+            fi
             echo "susfs_patch完成"
           fi
           source $REJ_CHECKER
