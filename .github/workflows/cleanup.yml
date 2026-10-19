@@ -803,8 +803,8 @@ jobs:
               echo "检测到 fs/namespace.c.rej，手动补齐 susfs_def.h / SUS_MOUNT 声明..."
               grep -q 'linux/susfs_def.h' fs/namespace.c || \
                 sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif' fs/namespace.c
-              grep -q 'susfs_is_current_ksu_domain' fs/namespace.c || \
-                sed -i '/Maximum number of mounts in a mount namespace/i #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n\n#define CL_COPY_MNT_NS BIT(25)\n#endif' fs/namespace.c
+              grep -q 'extern bool susfs_is_current_ksu_domain' fs/namespace.c || \
+                sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux/jump_label.h>\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n#endif' fs/namespace.c
               rm -f fs/namespace.c.rej
               echo "namespace.c 修复完成"
             fi
