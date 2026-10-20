@@ -153,14 +153,10 @@ on:
         required: true
         default: false
       DROID_SPACES:
-        type: choice
-        description: "DroidSpaces 支持：none=关闭 / standard=命名空间+ntsync / extend=额外 EVDI+BT_HCIVHCI+usermodehelper"
+        type: boolean
+        description: "是否添加轻量级Linux容器支持(DroidSpaces)？//Add lightweight Linux container support (DroidSpaces)?"
         required: true
-        default: 'none'
-        options:
-          - 'none'
-          - 'standard'
-          - 'extend'
+        default: false
       RE_KERNEL:
         type: boolean
         description: "是否添加Re-Kernel？//Add Re-Kernel?"
@@ -184,7 +180,7 @@ on:
 
 jobs:
   build:
-    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES != 'none' && (github.event.inputs.DROID_SPACES == 'extend' && ' [DS-EXT]' || ' [DS]') || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
+    name: ${{ github.event.inputs.FAST_BUILD == 'true' && ' [FAST]' || '' }}${{ contains(github.event.inputs.FILE, '_aosp') && ' [AOSP]' || '' }}${{ github.event.inputs.KPM == 'KPM' && ' [KPM]' || github.event.inputs.KPM == 'KPN' && ' [KPN]' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && ' [BBG]' || '' }}${{ github.event.inputs.SCHED_HMBIRD == 'true' && ' [HMBIRD]' || '' }}${{ github.event.inputs.DROID_SPACES == 'true' && ' [DS]' || '' }}${{ startsWith(github.event.inputs.ZRAM, '1/') && ' [ZRAM]' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && ' [REKER]' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && ' [LZ4UPD]' || '' }}For ${{ github.event.inputs.FILE }} ${{ github.event.inputs.SUFFIX }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "none"
@@ -797,17 +793,6 @@ jobs:
           if [ "${{ github.event.inputs.SUSFS_META }}" != "-1" ]; then
             echo "正在打susfs补丁"
             patch -p1 < 50_add_susfs_in_gki-${{ env.KANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
-
-            # ==== 修复 SUSFS hunk #1 在 OPLUS 树上失败（缺 susfs_def.h 与 SUS_MOUNT 声明）====
-            if [ -f fs/namespace.c.rej ]; then
-              echo "检测到 fs/namespace.c.rej，手动补齐 susfs_def.h / SUS_MOUNT 声明..."
-              grep -q 'linux/susfs_def.h' fs/namespace.c || \
-                sed -i '/#include <linux\/shmem_fs.h>/a #ifdef CONFIG_KSU_SUSFS\n#include <linux/susfs_def.h>\n#endif' fs/namespace.c
-              grep -q 'extern bool susfs_is_current_ksu_domain' fs/namespace.c || \
-                sed -i '/#include <linux\/susfs_def.h>/a #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT\n#include <linux/jump_label.h>\nextern bool susfs_is_current_ksu_domain(void);\nextern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;\n#define CL_COPY_MNT_NS BIT(25)\n#endif' fs/namespace.c
-              rm -f fs/namespace.c.rej
-              echo "namespace.c 修复完成"
-            fi
             echo "susfs_patch完成"
           fi
           source $REJ_CHECKER
@@ -882,7 +867,7 @@ jobs:
       - name: Apply DROID_SPACES
         env:
           FILE: ${{ github.event.inputs.FILE }}
-        if: ${{ github.event.inputs.DROID_SPACES != 'none' }}
+        if: ${{ github.event.inputs.DROID_SPACES == 'true' }}
         run: |
           PATCH_DIR="${GITHUB_WORKSPACE}/kernel_workspace/Action-Build/patches"
           cd kernel_workspace/kernel_platform/common
@@ -935,15 +920,21 @@ jobs:
             patch -p1 --forward < "${PATCH_DIR}/ntsync/ntsync_compat_$([ -f "${PATCH_DIR}/ntsync/ntsync_compat_${KMI}_${ANDROID_SHORT_VERSION}.patch" ] && echo "${KMI}_${ANDROID_SHORT_VERSION}" || echo "${KMI}").patch" || true
           fi
 
-          # ===== Droidspaces extend：EVDI DRM 驱动（提供 Lindroid 显示支持）=====
-          if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
-            echo "Droidspaces extend：应用 EVDI DRM 补丁..."
-            wget -q https://github.com/cctv18/oppo_oplus_realme_sm8650/raw/refs/heads/main/droidspaces_patch/evdi_drm.patch -O evdi_drm.patch || true
-            if [ -s evdi_drm.patch ] && patch -p1 --forward < evdi_drm.patch; then
-              echo "✅ EVDI DRM 补丁已应用"
+          # ===== Droidspaces 拓展支持（extend）=====
+          echo "Droidspaces 拓展支持：EVDI DRM 驱动..."
+          EVDI_URL="https://github.com/cctv18/oppo_oplus_realme_sm8650/raw/refs/heads/main/droidspaces_patch/evdi_drm.patch"
+          rm -f evdi_drm.patch
+          echo "DS_EXTEND_EVDI=false" >> $GITHUB_ENV
+          if wget -q "$EVDI_URL" -O evdi_drm.patch; then
+            if patch -p1 --dry-run --forward < evdi_drm.patch > /dev/null 2>&1; then
+              patch -p1 --forward < evdi_drm.patch
+              echo "DS_EXTEND_EVDI=true" >> $GITHUB_ENV
+              echo "✅ evdi_drm.patch 已应用，将启用 CONFIG_DRM_LINDROID_EVDI"
             else
-              echo "::warning::EVDI DRM 补丁应用失败，后续跳过 CONFIG_DRM_LINDROID_EVDI"
+              echo "::warning::evdi_drm.patch 在本内核上无法干净应用，跳过 EVDI（其它 Droidspaces 功能不受影响）"
             fi
+          else
+            echo "::warning::evdi_drm.patch 下载失败，跳过 EVDI"
           fi
 
           source $REJ_CHECKER
@@ -1135,8 +1126,8 @@ jobs:
             set_config "CONFIG_BBG=y"
           fi
 
-          # DROID_SPACES配置* (none/standard/extend)
-          if [ "${{ github.event.inputs.DROID_SPACES }}" != "none" ]; then
+          # DROID_SPACES配置*
+          if [ "${{ github.event.inputs.DROID_SPACES }}" = "true" ]; then
             set_config "CONFIG_NTSYNC=y"
             set_config "CONFIG_SYSVIPC=y"
             set_config "CONFIG_DEVTMPFS=y"
@@ -1148,16 +1139,17 @@ jobs:
             set_config "CONFIG_NETFILTER_XT_TARGET_REJECT=y"
             set_config "CONFIG_NETFILTER_XT_TARGET_LOG=y"
             set_config "CONFIG_NETFILTER_XT_MATCH_RECENT=y"
-          fi
 
-          # Droidspaces extend 额外配置*
-          if [ "${{ github.event.inputs.DROID_SPACES }}" = "extend" ]; then
+            # ===== Droidspaces 拓展支持（extend）=====
+            # 虚拟 HCI 设备（容器内蓝牙）
             set_config "CONFIG_BT_HCIVHCI=y"
+            # 允许 systemd-coredump 之类的用户态 helper
             set_config "CONFIG_STATIC_USERMODEHELPER=n"
-            if grep -q 'config DRM_LINDROID_EVDI' drivers/gpu/drm/Kconfig; then
+            # 只有 EVDI 补丁真正应用成功才开这个配置，避免“CONFIG 开了但驱动目录不存在”直接编译失败
+            if [ "$DS_EXTEND_EVDI" = "true" ]; then
               set_config "CONFIG_DRM_LINDROID_EVDI=y"
             else
-              echo "::warning::未找到 DRM_LINDROID_EVDI（evdi 补丁没打上），已跳过该配置"
+              echo "::warning::EVDI 补丁未应用，跳过 CONFIG_DRM_LINDROID_EVDI"
             fi
           fi
 
@@ -1563,7 +1555,7 @@ jobs:
       - name: Set zip Suffix
         id: suffix
         run: |
-          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES != 'none' && (github.event.inputs.DROID_SPACES == 'extend' && '_DS-EXT' || '_DS') || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
+          echo "value=${{ env.ZRAM_ALGO_U && format('_{0}', env.ZRAM_ALGO_U) || '' }}${{ github.event.inputs.KPM == 'KPM' && '_KPM' || github.event.inputs.KPM == 'KPN' && '_KPN' || '' }}${{ github.event.inputs.LSM_BBG == 'true' && '_BBG' || '' }}_ILH${{ github.event.inputs.SCHED_HMBIRD== 'true' && '_HMBIRD' || '' }}${{ github.event.inputs.DROID_SPACES== 'true' && '_DS' || '' }}${{ github.event.inputs.RE_KERNEL == 'true' && '_REKER' || '' }}${{ github.event.inputs.LZ4_UPDATE == 'true' && '_LZ4UPD' || '' }}" >> $GITHUB_OUTPUT
 
       - name: Upload AnyKernel3
         uses: actions/upload-artifact@v7
